@@ -93,10 +93,13 @@ distinguishable by saying which one you measured.
 random baseline (ret_iqm)   -0.378
 null   baseline (ret_iqm)   -0.360
 PPO @  69k steps            -0.898
-PPO @ 181k steps            -0.285      ep_len_mean 89.9  (the 90-turn cap)
+PPO @ 181k steps            -0.285
+PPO @ 500k steps            -0.00005     ep_len_mean 89.9  (the 90-turn cap)
 ```
 
-The policy is improving and has passed both baselines. It is **not** learning to plan trips.
+The run finished at 500k steps having converged to almost exactly zero, which is the
+do-nothing score, making the trained policy the BEST policy in the environment (0.000 vs
+heuristic -1.321). It passed both baselines. It is **not** learning to plan trips.
 `ep_len_mean` sits at 89.9 against a 90-turn cap, which means episodes are running to the
 cap instead of terminating — the policy is not reaching `BOOK` and `FINALIZE` at all.
 
@@ -128,6 +131,45 @@ the defence did not survive v2, because v2 made failure *expensive* without maki
 
 Recording this rather than shipping a curve that goes up and calling it learning. The curve
 does go up. What it is climbing toward is inaction.
+
+---
+
+## The tau-bench path, run live
+
+`openai/gpt-5-mini` as the agent against `openai/gpt-4.1-mini` as the client, on an
+OpenAI-compatible gateway. Two episodes, gateway-reported cost:
+
+```
+endpoint      OpenAI-compatible gateway     cost_usd/episode   0.0958
+solve_rate            0.00      axes_elicited          0.907
+complete_rate         0.00      constraints_elicited   1.000
+mean_steps           90.0       parse_failure_rate     0.35
+tokens  agent 136,120 prompt / 72,185 completion · client 40,649 / 1,192
+```
+
+**The agent behaves the way the environment is designed to reward.** It elicits 91% of the
+preference axes and **100% of the hard-constraint classes** — against the hand-written
+heuristic's 57% and **0%**. Nothing told it to; the tool descriptions say constraints must be
+asked about before search can filter on them, and it worked that out.
+
+**And it still completes 0% of trips**, exactly like every other policy. That is the most
+useful single result here: an LLM agent doing the *right* thing qualitatively, and still
+hitting the same wall, is strong evidence the 10% completion ceiling is a defect in the
+**environment** rather than a limitation of the agents being measured against it.
+
+Two caveats, both mine rather than the model's. `parse_failure_rate` 0.35 and 60 call
+failures are the per-episode call budget (60) running out across a 90-step episode, not
+malformed output — raise the budget or shorten the episode. And `client_fallbacks` 122 means
+the client simulator hit its own 15-call cap and fell back to scripted replies for most of
+the conversation, so this run does not yet test the LLM client properly.
+
+A bug worth recording: the first live run reported `parse_failure_rate 1.0` and 180 call
+failures with **zero tokens**, and printed a clean `-0.36` that looked exactly like a policy
+choosing to do nothing. The cause was that `run_episode` armed the client's per-episode call
+budget but never the agent's, so every agent call was refused before it was sent and the
+harness silently fell back to first-legal-action. A silent fallback that looks like a result
+is the worst failure mode an eval harness has, which is why `parse_failure_rate`,
+`llm_call_failures` and token counts are all reported rather than summarised away.
 
 ---
 

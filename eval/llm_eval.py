@@ -78,6 +78,9 @@ class EpisodeRecord(FrozenModel):
     axes_elicited: float
     constraints_elicited: float
     client_turns: int
+    client_fallbacks: int = 0
+    """Client turns where the simulator's LLM call failed and a canned line was used. A
+    silent fallback here would show up as a plausible-looking solve rate on a broken run."""
 
 
 # ---- policies ---------------------------------------------------------------------------
@@ -312,6 +315,12 @@ def run_episode(policy: Any, *, seed: int, difficulty: float, client_kind: str, 
     core = env.unwrapped
     policy.reset()
 
+    # Arm BOTH per-episode call budgets. Only the client's was reset, so the agent's
+    # counter carried across episodes and every agent call was refused before it was made —
+    # which surfaced as parse_failure_rate 1.0 and an agent that looked like it had chosen
+    # to do nothing. A silent fallback that looks like a policy is the worst kind of bug.
+    if hasattr(policy, "llm") and policy.llm is not None:
+        policy.llm.begin_episode()
     if client_kind == "llm":
         client_llm.begin_episode()
         client = LLMClientSim(core.persona, core.transcript[0][1], client_llm)
@@ -351,6 +360,7 @@ def run_episode(policy: Any, *, seed: int, difficulty: float, client_kind: str, 
         axes_elicited=float(info["axes_elicited"]),
         constraints_elicited=float(info["constraints_elicited"]),
         client_turns=client_turns,
+        client_fallbacks=int(getattr(client, "fallbacks", 0)),
     )
 
 
@@ -468,6 +478,7 @@ def _report(
         "axes_elicited": round(float(np.mean([r.axes_elicited for r in records])), 3),
         "constraints_elicited": round(float(np.mean([r.constraints_elicited for r in records])), 3),
         "client_turns_mean": round(float(np.mean([r.client_turns for r in records])), 1),
+        "client_fallbacks": int(sum(r.client_fallbacks for r in records)),
         "pass^1": round(pass_hat_k(successes_per_task, args.trials, 1), 4),
         "pass^k": (
             round(pass_hat_k(successes_per_task, args.trials, args.trials), 4)
@@ -496,7 +507,7 @@ def format_report(report: dict[str, Any]) -> str:
         "agent", "agent_model", "client", "client_model", "endpoint", "episodes",
         "solve_rate", "return_iqm", "return_mean", "complete_rate", "walk_rate",
         "mean_steps", "constraint_failure_rate", "axes_elicited", "constraints_elicited",
-        "client_turns_mean", "pass^1", "pass^k", "solve_by_stratum",
+        "client_turns_mean", "client_fallbacks", "pass^1", "pass^k", "solve_by_stratum",
         "parse_failure_rate", "llm_call_failures", "tokens", "cost_usd",
         "cost_usd_per_episode", "cost_source",
     ]

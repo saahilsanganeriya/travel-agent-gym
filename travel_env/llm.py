@@ -199,6 +199,10 @@ class LLMClient:
             headers={
                 "Authorization": f"Bearer {self._key}",
                 "Content-Type": "application/json",
+                # Load-bearing: the first gateway used sits behind Cloudflare, which rejects the
+                # default `Python-urllib/3.x` agent with a 403 (error 1010). Any real
+                # User-Agent passes. Cost us a full eval run to find.
+                "User-Agent": "travel-agent-env/1.0",
                 # OpenRouter attributes traffic from these; other gateways ignore them.
                 "HTTP-Referer": "https://github.com/saahilsanganeriya/travel-agent-gym",
                 "X-Title": "travel-agent-env",

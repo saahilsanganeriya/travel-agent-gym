@@ -213,12 +213,12 @@ class ScriptedClientSim:
 
     def reply(self, question: str) -> str:
         lowered = question.lower()
-        for klass, prompt in _CONSTRAINT_QUESTIONS.items():
-            if _overlaps(lowered, prompt):
-                return self._constraint_answer(klass)
-        for axis, prompt in _AXIS_QUESTIONS.items():
-            if _overlaps(lowered, prompt):
-                return f"{_DISPOSITION[self.persona.weights[axis]].capitalize()} {axis.value}."
+        klass = _best_match(lowered, _CONSTRAINT_KEYWORDS)
+        if klass is not None:
+            return self._constraint_answer(klass)
+        axis = _best_match(lowered, _AXIS_KEYWORDS)
+        if axis is not None:
+            return f"{_DISPOSITION[self.persona.weights[axis]].capitalize()} {axis.value}."
         return "I'm not sure I follow — what do you need from me?"
 
     def _constraint_answer(self, klass: ConstraintClass) -> str:
@@ -242,7 +242,32 @@ class ScriptedClientSim:
         return "I don't remember."
 
 
-def _overlaps(question: str, canonical: str) -> bool:
-    """Keyword overlap, not equality: an LLM agent phrases the question its own way."""
-    keywords = {w.strip(",.?—-") for w in canonical.lower().split() if len(w) > 5}
-    return sum(k in question for k in keywords) >= 2
+# Topic keywords, not string similarity: an LLM agent phrases the question its own way, and
+# the canonical wording shares too many stopwords across topics to separate them.
+_CONSTRAINT_KEYWORDS: dict[ConstraintClass, tuple[str, ...]] = {
+    ConstraintClass.ACCESSIBILITY: (
+        "accessib", "step-free", "step free", "wheelchair", "mobility", "lift", "elevator",
+        "service animal", "disab",
+    ),
+    ConstraintClass.CAPACITY: ("how many", "travelling", "traveling", "party", "old is", "ages", "children", "kids"),
+    ConstraintClass.DOCUMENTS: ("passport", "visa", "document", "nationalit", "citizen"),
+    ConstraintClass.COMMITMENTS: ("fixed", "calendar", "commitment", "have to be at", "appointment", "booked ticket"),
+}
+
+_AXIS_KEYWORDS: dict[PreferenceAxis, tuple[str, ...]] = {
+    PreferenceAxis.COST: ("budget", "cost", "spend", "afford", "price", "cheap"),
+    PreferenceAxis.COMFORT: ("comfort", "nice room", "luxur"),
+    PreferenceAxis.LOCATION: ("central", "location", "get around", "neighbourhood", "neighborhood"),
+    PreferenceAxis.PACING: ("pacing", "packed", "downtime", "schedule", "relax", "busy"),
+    PreferenceAxis.FOOD: ("food", "eat", "restaurant", "cuisine", "dining"),
+    PreferenceAxis.CULTURE: ("culture", "cultural", "history", "historic", "museum", "temple"),
+    PreferenceAxis.NOVELTY: ("novelty", "off the beaten", "unusual", "adventur", "famous sights"),
+    PreferenceAxis.RELIABILITY: ("reliab", "risk", "go wrong", "connection", "delay", "on time"),
+}
+
+
+def _best_match[T](question: str, keywords: dict[T, tuple[str, ...]]) -> T | None:
+    """The topic with the most keyword hits, or None when nothing matched."""
+    scores = {topic: sum(k in question for k in words) for topic, words in keywords.items()}
+    best = max(scores, key=lambda t: scores[t])
+    return best if scores[best] > 0 else None

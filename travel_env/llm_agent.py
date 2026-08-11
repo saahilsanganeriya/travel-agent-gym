@@ -30,7 +30,6 @@ from travel_env.actions_v2 import (
     LodgingFilter,
     Verb,
     decode,
-    describe,
     encode,
     verb_slice,
 )
@@ -348,8 +347,3 @@ class LLMAgent:
 
         self.parse_failures += 1
         return fallback
-
-
-def describe_action(action: int) -> str:
-    """Thin re-export so eval logs do not have to import the action module."""
-    return describe(action)
