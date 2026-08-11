@@ -59,7 +59,7 @@ from travel_env.rewards import (
     terminal_reward,
     zero_components,
 )
-from travel_env.world import generate_world
+from travel_env.world import generate_world, generate_world_cached
 
 MAX_TURNS = 60
 N_AXES = len(PreferenceAxis)
@@ -105,6 +105,7 @@ class TravelAgentEnv(gym.Env):
         nights: int = 7,
         difficulty: float = 0.5,
         enable_act_two: bool = True,
+        exact_worlds: bool = True,
         client=None,
     ) -> None:
         super().__init__()
@@ -112,6 +113,7 @@ class TravelAgentEnv(gym.Env):
         self.nights = nights
         self.difficulty = float(np.clip(difficulty, 0.0, 1.0))
         self.enable_act_two = enable_act_two
+        self.exact_worlds = exact_worlds
         self.client = client  # None → scripted behaviour, set by the harness for LLM runs
 
         self.action_space = spaces.Discrete(N_ACTIONS)
@@ -142,7 +144,10 @@ class TravelAgentEnv(gym.Env):
         trip_start = datetime(2027, 4, 3, tzinfo=UTC) + timedelta(
             days=int(self.np_random.integers(-60, 240))
         )
-        self.world = generate_world(world_seed, trip_start=trip_start, nights=self.nights)
+        # Exact by default: world pooling measured SLOWER than regeneration (see
+        # `generate_world_cached`). Kept as an opt-in so the experiment is reproducible.
+        build = generate_world if self.exact_worlds else generate_world_cached
+        self.world = build(world_seed, trip_start=trip_start, nights=self.nights)
         self.districts = self.world.district_index()
         self.persona = draw_persona(self.np_random, difficulty=difficulty)
 

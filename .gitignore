@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
-logs/
+logs/*
+!logs/published/
 models/
 .env
