@@ -171,7 +171,16 @@ class HeuristicV2Policy:
         if core.timeline.outbound is None or core.timeline.inbound is None:
             a = first_legal(*(encode(Verb.SELECT_FLIGHT, i) for i in range(SLATE_K)))
             if a is not None:
+                self.empty_flight_searches = 0
                 return a
+            # Every preset returning nothing means the market, not the filter, is the
+            # problem — the route's gateway is unreachable or unaffordable. Re-searching a
+            # sixth time is the loop that eats an episode; unwind the route instead.
+            if self.empty_flight_searches >= len(FlightPreset):
+                a = first_legal(encode(Verb.DROP_CITY))
+                if a is not None:
+                    self.empty_flight_searches = 0
+                    return a
             preset = (
                 FlightPreset.MOST_RELIABLE
                 if reliability_w > 0.6
@@ -179,11 +188,11 @@ class HeuristicV2Policy:
                 if cost_w > 0.5
                 else FlightPreset.FASTEST
             )
-            a = first_legal(
-                encode(Verb.SEARCH_FLIGHTS, list(FlightPreset).index(preset)),
-                encode(Verb.SEARCH_FLIGHTS, list(FlightPreset).index(FlightPreset.CHEAPEST)),
-            )
+            rotation = [preset] + [p for p in FlightPreset if p is not preset]
+            choice = rotation[self.empty_flight_searches % len(rotation)]
+            a = first_legal(encode(Verb.SEARCH_FLIGHTS, list(FlightPreset).index(choice)))
             if a is not None:
+                self.empty_flight_searches += 1
                 return a
 
         # 5. Ground legs, if the route happens to have a hop.
@@ -192,19 +201,26 @@ class HeuristicV2Policy:
             return a
 
         # 6. Lodging for every city on the route.
+        _HOTEL_SEARCH_CAP = 4
         if core._pending_city() is not None:
             a = first_legal(*(encode(Verb.SELECT_HOTEL, i) for i in range(SLATE_K)))
             if a is not None:
+                self.empty_hotel_searches = 0
                 return a
             sort = HotelSort.BEST_RATED if comfort_w > 0.55 else HotelSort.CHEAPEST
             lodging = LodgingFilter.WHOLE_UNIT if core.needs.size >= 3 else LodgingFilter.ANY
-            a = first_legal(
-                encode_hotel_search(sort, lodging),
-                encode_hotel_search(HotelSort.CHEAPEST, LodgingFilter.ANY),
-                encode_hotel_search(HotelSort.CHEAPEST, LodgingFilter.BUDGET),
-            )
-            if a is not None:
-                return a
+            # Same anti-loop guard as flights: a handful of filters, then stop paying turns
+            # for a market that has nothing this party can both use and afford.
+            if self.empty_hotel_searches < _HOTEL_SEARCH_CAP:
+                a = first_legal(
+                    encode_hotel_search(sort, lodging),
+                    encode_hotel_search(HotelSort.CHEAPEST, LodgingFilter.ANY),
+                    encode_hotel_search(HotelSort.CHEAPEST, LodgingFilter.BUDGET),
+                    encode_hotel_search(HotelSort.MOST_CENTRAL, LodgingFilter.ANY),
+                )
+                if a is not None:
+                    self.empty_hotel_searches += 1
+                    return a
 
         # 7. A few activities on the client's strongest axis.
         if len(core.timeline.activities) < self.want_activities:
