@@ -23,14 +23,16 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 
 import gymnasium as gym
 
-import travel_env.env  # noqa: F401 — registers travel_agent/TravelAgent-v0
-from travel_env.env import MAX_TURNS
+import travel_env.env  # noqa: F401 — registers travel_agent/TravelAgent-v0 (frozen v1)
+import travel_env.env_v2  # noqa: F401 — registers travel_agent/TravelAgent-v2 (the default)
+
+DEFAULT_ENV = "travel_agent/TravelAgent-v2"
 
 MODEL_DIR = Path("models")
 LOG_DIR = Path("logs")
 
 
-def make_env(**kwargs):
+def make_env(env_id: str, max_turns: int, **kwargs):
     """Build through `gym.make`, never by instantiating the class.
 
     `make_vec_env(TravelAgentEnv, ...)` constructs the class directly and therefore skips
@@ -39,9 +41,7 @@ def make_env(**kwargs):
     """
 
     def _init():
-        return Monitor(
-            gym.make("travel_agent/TravelAgent-v0", max_episode_steps=MAX_TURNS, **kwargs)
-        )
+        return Monitor(gym.make(env_id, max_episode_steps=max_turns, **kwargs))
 
     return _init
 
@@ -54,13 +54,15 @@ def train(
     enable_act_two: bool = True,
     ent_coef: float = 0.02,
     run_name: str = "maskable_ppo",
+    env_id: str = DEFAULT_ENV,
 ) -> None:
     MODEL_DIR.mkdir(exist_ok=True)
     LOG_DIR.mkdir(exist_ok=True)
 
+    max_turns = gym.spec(env_id).max_episode_steps or 60
     env_kwargs = {"difficulty": difficulty, "enable_act_two": enable_act_two}
-    venv = SubprocVecEnv([make_env(**env_kwargs) for _ in range(n_envs)])
-    eval_venv = SubprocVecEnv([make_env(**env_kwargs) for _ in range(2)])
+    venv = SubprocVecEnv([make_env(env_id, max_turns, **env_kwargs) for _ in range(n_envs)])
+    eval_venv = SubprocVecEnv([make_env(env_id, max_turns, **env_kwargs) for _ in range(2)])
 
     model = MaskablePPO(
         "MultiInputPolicy",  # the observation is a single-level Dict
@@ -102,8 +104,10 @@ if __name__ == "__main__":
     ap.add_argument("--no-act-two", action="store_true")
     ap.add_argument("--ent-coef", type=float, default=0.02)
     ap.add_argument("--run-name", type=str, default="maskable_ppo")
+    ap.add_argument("--env-id", type=str, default=DEFAULT_ENV)
     a = ap.parse_args()
     train(
         steps=a.steps, n_envs=a.n_envs, difficulty=a.difficulty,
         enable_act_two=not a.no_act_two, ent_coef=a.ent_coef, run_name=a.run_name,
+        env_id=a.env_id,
     )
