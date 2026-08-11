@@ -143,10 +143,12 @@ class HeuristicPolicy:
         self.ask_budget = ask_budget
         self.asked: list[int] = []
         self.asked_classes = 0
+        self.tried: set[int] = set()
 
     def reset(self) -> None:
         self.asked = []
         self.asked_classes = 0
+        self.tried: set[int] = set()
 
     def act(self, obs: dict, info: dict, env) -> int:
         mask = info["action_mask"]
@@ -190,9 +192,12 @@ class HeuristicPolicy:
                 else FlightPreset.CHEAPEST if cost_w > 0.5
                 else FlightPreset.FASTEST
             )
-            for p in (preset, FlightPreset.CHEAPEST, FlightPreset.FASTEST):
-                a = _first(info, encode(Verb.SEARCH_FLIGHTS, list(FlightPreset).index(p)))
-                if a is not None:
+            # Try each preset ONCE. Repeating a search that surfaced nothing affordable is
+            # not a move; a real agent widens the net instead of asking the same question.
+            for p in (preset, FlightPreset.CHEAPEST, FlightPreset.FASTEST, FlightPreset.FLEXIBLE):
+                a = encode(Verb.SEARCH_FLIGHTS, list(FlightPreset).index(p))
+                if mask[a] and a not in self.tried:
+                    self.tried.add(a)
                     return a
 
         # 4. Intercity legs for every hop the route implies.
@@ -200,9 +205,11 @@ class HeuristicPolicy:
             a = _first(info, *(encode(Verb.SELECT_GROUND, i) for i in range(SLATE_K)))
             if a is not None:
                 return a
-            for p in (GroundPreset.ROBUST if rel_w > 0.6 else GroundPreset.CHEAPEST, GroundPreset.CHEAPEST, GroundPreset.FASTEST):
-                a = _first(info, encode(Verb.SEARCH_GROUND, list(GroundPreset).index(p)))
-                if a is not None:
+            for p in (GroundPreset.ROBUST if rel_w > 0.6 else GroundPreset.CHEAPEST,
+                      GroundPreset.CHEAPEST, GroundPreset.FASTEST, GroundPreset.OVERNIGHT):
+                a = encode(Verb.SEARCH_GROUND, list(GroundPreset).index(p))
+                if mask[a] and a not in self.tried:
+                    self.tried.add(a)
                     return a
 
         # 5. A bed in every route city. Re-search cheaper rather than standing there, which
@@ -213,9 +220,10 @@ class HeuristicPolicy:
                 return a
             sort = HotelSort.BEST_RATED if comfort_w > 0.55 else HotelSort.CHEAPEST
             for s in (sort, HotelSort.CHEAPEST, HotelSort.MOST_CENTRAL):
-                for f in (LodgingFilter.ANY, LodgingFilter.WHOLE_UNIT, LodgingFilter.BUDGET):
-                    a = _first(info, encode_hotel_search(s, f))
-                    if a is not None:
+                for f in (LodgingFilter.ANY, LodgingFilter.BUDGET, LodgingFilter.WHOLE_UNIT):
+                    a = encode_hotel_search(s, f)
+                    if mask[a] and (a, core._pending_city()) not in self.tried:
+                        self.tried.add((a, core._pending_city()))
                         return a
 
         # 6. Activities are upside, then confirm, commit and close out, in that order.

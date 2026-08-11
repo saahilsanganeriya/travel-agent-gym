@@ -36,6 +36,57 @@ the heuristic near 30%, low enough to leave a learned policy room to beat it. Bo
 Random solving 25% is the more damning number, because it says the task can be completed by
 accident — the space of legal plans was too small to get lost in.
 
+## Where v2 actually landed — measured, 60 frozen seeds
+
+```
+policy             solve   ret_iqm  complete   walk  steps  prefs  hard_q  cfail
+null                0.00   -0.3600      0.00   0.00   90.0   0.33    0.00   0.00
+random              0.00   -0.3782      0.00   0.13   89.5   0.91    0.99   0.00
+greedy_cheapest     0.00   -1.7207      0.00   0.63   82.1   0.25    0.00   0.00
+greedy_quality      0.00   -1.7230      0.00   0.63   82.1   0.25    0.00   0.00
+heuristic           0.07   -1.3215      0.10   0.47   83.7   0.57    0.00   0.02
+expert              0.03   -1.1578      0.05   0.40   85.3   0.57    1.00   0.00
+```
+
+| | v1 | v2 | verdict |
+|---|---|---|---|
+| random | 0.25 | **0.00** | ✅ the fix that mattered |
+| greedy_cheapest / greedy_quality | 0.00 | 0.00 | ✅ held |
+| heuristic | 0.96 | **0.07** | ❌ overshot past the band |
+
+**The real win.** Random went from solving one episode in four to solving none. That was v1's
+more damning number, because it meant the task could be completed *by accident*, and widening
+the world fixed it exactly as predicted: a coherent multi-region route with a correct
+night-by-night allocation is not something a uniform policy stumbles into.
+
+**The honest failure.** 7% is too low to learn from — almost no success signal — the wrong end of
+the same problem v1 had. And the reason is **not** "the task became appropriately hard":
+
+`complete` is 0.10. The heuristic is not losing on judgement, it is failing to finish. Two
+causes were found and fixed, and one remains:
+
+- *Fixed — no budget reserve.* v1 reserved minimum lodging out of the flight budget. v2
+  dropped it, so an outbound leg could consume 97% of the budget (measured: 839,645 of
+  867,298) and every later selection was masked off. Diagnosed from a rollout that spent
+  **76 of 90 turns re-running the same flight search.**
+- *Fixed — the heuristic repeated an identical search.* A slate with nothing affordable on it
+  produced the same query every turn. A real agent widens the net; it now tries each preset
+  once.
+- *Not fixed.* Completion is still 10%. Raising the turn cap 90 → 150 made things **worse**
+  (walk rate 0.47 → 0.80, completion unmoved), which is itself the useful finding: turns and
+  patience are two spellings of one budget, and neither is the blocker.
+
+`expert` — the heuristic plus the four constraint questions — is the reference for what
+interviewing is worth. Today it is inside noise of `heuristic` (0.03 vs 0.07), so **the
+central claim of v2 is currently unproven**: the mechanism is built and the measurement does
+not yet demonstrate it pays. That gap is the first thing to close.
+
+This is recorded rather than tuned until a number looked right. An environment that is hard
+because the agent cannot complete the task is not hard, it is broken, and the two are only
+distinguishable by saying which one you measured.
+
+---
+
 ## The principle behind v2: harder ≠ noisier
 
 | change | effect | why |

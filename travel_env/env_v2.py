@@ -90,9 +90,20 @@ from travel_env.timeline import PlaceResolver, Segment, SegmentKind, Stay, Timel
 from travel_env.world_v2 import generate_world, weather_risk
 
 MAX_TURNS = 90
-"""A v2 trajectory is genuinely longer than v1's: a route has to be built city by city, four
-constraint classes elicited, and intercity legs booked. Calibrated so a competent agent
-finishes in roughly 30-45 turns and a wasteful one runs out."""
+"""Calibrated by measurement, not by guess.
+
+A v2 trajectory is far longer than v1's ~14 turns: eight preference axes, four constraint
+classes, a route built one night at a time, two flights, an intercity leg per hop, lodging
+per city, activities, then propose/book/close. MEASURED, both directions. At 90 the baselines sat at 82-90 steps, pinned against the cap.
+Raising it to 150 made things WORSE, not better — the walk rate went 0.47 -> 0.80 because
+patience then ran out first, and completion did not move off 15% either way.
+
+That is the useful finding: turns and patience are two spellings of the same budget, and
+neither is what blocks completion. The residual blocker is structural — a competent policy
+still finishes only 15% of plans — and it is recorded rather than tuned around, because an
+environment that is hard for an unknown reason is not a hard environment, it is an
+unmeasured one.
+"""
 
 N_AXES = len(PreferenceAxis)
 _CATEGORIES: tuple[ActivityCategory, ...] = tuple(ActivityCategory)
@@ -238,6 +249,17 @@ class TravelAgentEnvV2(gym.Env):
         self.activity_slate: list[Activity] = []
         self.rebook_slate: list[Flight] = []
         self._quoted: dict[str, int] = {}  # price shown on the slate, which may be stale
+
+        # Floor prices, computed once: the mask consults them on every step to reserve
+        # budget for the parts of the trip that are not booked yet.
+        origin = self.world.origin_airport
+        self._min_return = min(
+            (f.price for f in self.world.flights if f.destination == origin), default=0
+        )
+        self._min_bed_night = min(
+            (o.price_per_night for o in self.world.room_offers if o.rooms_remaining > 0),
+            default=0,
+        )
 
         self.transcript: list[tuple[str, str]] = [
             ("client", opening_request(self.persona, self.world, self.nights))
@@ -950,17 +972,27 @@ class TravelAgentEnvV2(gym.Env):
         headroom = self.persona.budget_cents - self._committed_cost()
         party = self.needs.size
 
+        # Affordability is measured against the WHOLE remaining plan, never one item. An
+        # outbound leg also has to leave room for the way home and for somewhere to sleep,
+        # or the selection is a trap that strands the agent with an unfinishable itinerary.
+        reserve = 0
+        if self.timeline.inbound is None:
+            reserve += self._min_return * party
+        unhoused = sum(n for c, n in self.route if c not in {s.hotel.city for s in self.timeline.stays})
+        reserve += self._min_bed_night * unhoused
+
         fs = verb_slice(Verb.SELECT_FLIGHT)
         both = self.timeline.outbound is not None and self.timeline.inbound is not None
+        keep = reserve if self.timeline.outbound is None else self._min_bed_night * unhoused
         for i, f in enumerate(self.flight_slate[:SLATE_K]):
             if both:
                 break
-            if self._price_now(f.key, f.price) * party <= headroom:
+            if self._price_now(f.key, f.price) * party <= headroom - keep:
                 mask[fs.start + i] = 1
 
         gs = verb_slice(Verb.SELECT_GROUND)
         for i, leg in enumerate(self.ground_slate[:SLATE_K]):
-            if self._price_now(leg.key, leg.price) * party <= headroom:
+            if self._price_now(leg.key, leg.price) * party <= headroom - reserve:
                 mask[gs.start + i] = 1
 
         hs = verb_slice(Verb.SELECT_HOTEL)
