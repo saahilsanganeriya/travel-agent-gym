@@ -1,0 +1,452 @@
+[
+  {
+    "difficulty": 0.0,
+    "what_the_agent_sees": {
+      "opening_request": "Japan, 7 nights, family of 5, kids included. Budget ~$8,213. Somewhere comfortable, we're into food, nothing that risks going wrong.",
+      "stated_axes": [
+        "comfort",
+        "food",
+        "reliability"
+      ]
+    },
+    "hidden_from_the_agent": {
+      "weights_0_to_9": {
+        "cost": 5,
+        "comfort": 7,
+        "location": 4,
+        "pacing": 9,
+        "food": 7,
+        "culture": 4,
+        "novelty": 0,
+        "reliability": 9
+      },
+      "weights_normalised": {
+        "cost": 0.1111,
+        "comfort": 0.1556,
+        "location": 0.0889,
+        "pacing": 0.2,
+        "food": 0.1556,
+        "culture": 0.0889,
+        "novelty": 0.0,
+        "reliability": 0.2
+      }
+    },
+    "behavioural": {
+      "age_band": "60_plus",
+      "party_type": "family_with_kids",
+      "party_size": 5,
+      "communication_style": "formal",
+      "budget_usd": 8213.43,
+      "budget_flexibility": 0.181,
+      "initial_patience": 30,
+      "patience_decay_per_turn": 1.039,
+      "tech_savvy": 3,
+      "risk_tolerance": 4,
+      "reply_verbosity": 3
+    }
+  },
+  {
+    "difficulty": 0.25,
+    "what_the_agent_sees": {
+      "opening_request": "Japan, 7 nights, business trip. Budget ~$3,614. Somewhere comfortable, nothing that risks going wrong.",
+      "stated_axes": [
+        "comfort",
+        "reliability"
+      ]
+    },
+    "hidden_from_the_agent": {
+      "weights_0_to_9": {
+        "cost": 2,
+        "comfort": 9,
+        "location": 6,
+        "pacing": 4,
+        "food": 3,
+        "culture": 1,
+        "novelty": 2,
+        "reliability": 9
+      },
+      "weights_normalised": {
+        "cost": 0.0556,
+        "comfort": 0.25,
+        "location": 0.1667,
+        "pacing": 0.1111,
+        "food": 0.0833,
+        "culture": 0.0278,
+        "novelty": 0.0556,
+        "reliability": 0.25
+      }
+    },
+    "behavioural": {
+      "age_band": "60_plus",
+      "party_type": "business",
+      "party_size": 1,
+      "communication_style": "chatty",
+      "budget_usd": 3614.34,
+      "budget_flexibility": 0.087,
+      "initial_patience": 28,
+      "patience_decay_per_turn": 1.365,
+      "tech_savvy": 3,
+      "risk_tolerance": 5,
+      "reply_verbosity": 6
+    }
+  },
+  {
+    "difficulty": 0.5,
+    "what_the_agent_sees": {
+      "opening_request": "Japan, 7 nights, business trip. Budget ~$7,681. We're into food, central, easy to get around.",
+      "stated_axes": [
+        "food",
+        "location"
+      ]
+    },
+    "hidden_from_the_agent": {
+      "weights_0_to_9": {
+        "cost": 1,
+        "comfort": 9,
+        "location": 9,
+        "pacing": 2,
+        "food": 6,
+        "culture": 2,
+        "novelty": 3,
+        "reliability": 9
+      },
+      "weights_normalised": {
+        "cost": 0.0244,
+        "comfort": 0.2195,
+        "location": 0.2195,
+        "pacing": 0.0488,
+        "food": 0.1463,
+        "culture": 0.0488,
+        "novelty": 0.0732,
+        "reliability": 0.2195
+      }
+    },
+    "behavioural": {
+      "age_band": "45_59",
+      "party_type": "business",
+      "party_size": 2,
+      "communication_style": "formal",
+      "budget_usd": 7681.6,
+      "budget_flexibility": 0.222,
+      "initial_patience": 29,
+      "patience_decay_per_turn": 1.101,
+      "tech_savvy": 5,
+      "risk_tolerance": 6,
+      "reply_verbosity": 2
+    }
+  },
+  {
+    "difficulty": 0.75,
+    "what_the_agent_sees": {
+      "opening_request": "Japan, 7 nights, 5 of us. Budget ~$6,570. Central, easy to get around, want to see something off the beaten path.",
+      "stated_axes": [
+        "location",
+        "novelty"
+      ]
+    },
+    "hidden_from_the_agent": {
+      "weights_0_to_9": {
+        "cost": 8,
+        "comfort": 4,
+        "location": 8,
+        "pacing": 2,
+        "food": 5,
+        "culture": 4,
+        "novelty": 9,
+        "reliability": 2
+      },
+      "weights_normalised": {
+        "cost": 0.1905,
+        "comfort": 0.0952,
+        "location": 0.1905,
+        "pacing": 0.0476,
+        "food": 0.119,
+        "culture": 0.0952,
+        "novelty": 0.2143,
+        "reliability": 0.0476
+      }
+    },
+    "behavioural": {
+      "age_band": "18_29",
+      "party_type": "friends",
+      "party_size": 5,
+      "communication_style": "casual",
+      "budget_usd": 6570.65,
+      "budget_flexibility": 0.23,
+      "initial_patience": 34,
+      "patience_decay_per_turn": 1.617,
+      "tech_savvy": 6,
+      "risk_tolerance": 4,
+      "reply_verbosity": 1
+    }
+  },
+  {
+    "difficulty": 1.0,
+    "what_the_agent_sees": {
+      "opening_request": "Japan, 7 nights, two of us. Budget ~$2,705. Historical sites matter to us.",
+      "stated_axes": [
+        "culture"
+      ]
+    },
+    "hidden_from_the_agent": {
+      "weights_0_to_9": {
+        "cost": 5,
+        "comfort": 4,
+        "location": 7,
+        "pacing": 2,
+        "food": 4,
+        "culture": 6,
+        "novelty": 4,
+        "reliability": 6
+      },
+      "weights_normalised": {
+        "cost": 0.1316,
+        "comfort": 0.1053,
+        "location": 0.1842,
+        "pacing": 0.0526,
+        "food": 0.1053,
+        "culture": 0.1579,
+        "novelty": 0.1053,
+        "reliability": 0.1579
+      }
+    },
+    "behavioural": {
+      "age_band": "30_44",
+      "party_type": "couple",
+      "party_size": 2,
+      "communication_style": "formal",
+      "budget_usd": 2705.97,
+      "budget_flexibility": 0.267,
+      "initial_patience": 28,
+      "patience_decay_per_turn": 1.342,
+      "tech_savvy": 7,
+      "risk_tolerance": 4,
+      "reply_verbosity": 2
+    }
+  },
+  {
+    "difficulty": 0.0,
+    "what_the_agent_sees": {
+      "opening_request": "Japan, 7 nights, family of 5, kids included. Budget ~$12,251. Somewhere comfortable, central, easy to get around, not too packed a schedule.",
+      "stated_axes": [
+        "comfort",
+        "location",
+        "pacing"
+      ]
+    },
+    "hidden_from_the_agent": {
+      "weights_0_to_9": {
+        "cost": 5,
+        "comfort": 9,
+        "location": 6,
+        "pacing": 8,
+        "food": 4,
+        "culture": 4,
+        "novelty": 0,
+        "reliability": 7
+      },
+      "weights_normalised": {
+        "cost": 0.1163,
+        "comfort": 0.2093,
+        "location": 0.1395,
+        "pacing": 0.186,
+        "food": 0.093,
+        "culture": 0.093,
+        "novelty": 0.0,
+        "reliability": 0.1628
+      }
+    },
+    "behavioural": {
+      "age_band": "45_59",
+      "party_type": "family_with_kids",
+      "party_size": 5,
+      "communication_style": "terse",
+      "budget_usd": 12251.03,
+      "budget_flexibility": 0.259,
+      "initial_patience": 31,
+      "patience_decay_per_turn": 0.984,
+      "tech_savvy": 6,
+      "risk_tolerance": 4,
+      "reply_verbosity": 0
+    }
+  },
+  {
+    "difficulty": 0.25,
+    "what_the_agent_sees": {
+      "opening_request": "Japan, 7 nights, business trip. Budget ~$7,026. Keep it affordable, central, easy to get around.",
+      "stated_axes": [
+        "cost",
+        "location"
+      ]
+    },
+    "hidden_from_the_agent": {
+      "weights_0_to_9": {
+        "cost": 4,
+        "comfort": 7,
+        "location": 8,
+        "pacing": 1,
+        "food": 4,
+        "culture": 0,
+        "novelty": 4,
+        "reliability": 9
+      },
+      "weights_normalised": {
+        "cost": 0.1081,
+        "comfort": 0.1892,
+        "location": 0.2162,
+        "pacing": 0.027,
+        "food": 0.1081,
+        "culture": 0.0,
+        "novelty": 0.1081,
+        "reliability": 0.2432
+      }
+    },
+    "behavioural": {
+      "age_band": "30_44",
+      "party_type": "business",
+      "party_size": 2,
+      "communication_style": "formal",
+      "budget_usd": 7026.51,
+      "budget_flexibility": 0.554,
+      "initial_patience": 34,
+      "patience_decay_per_turn": 1.564,
+      "tech_savvy": 6,
+      "risk_tolerance": 3,
+      "reply_verbosity": 4
+    }
+  },
+  {
+    "difficulty": 0.5,
+    "what_the_agent_sees": {
+      "opening_request": "Japan, 7 nights, business trip. Budget ~$8,088. Keep it affordable, nothing that risks going wrong.",
+      "stated_axes": [
+        "cost",
+        "reliability"
+      ]
+    },
+    "hidden_from_the_agent": {
+      "weights_0_to_9": {
+        "cost": 5,
+        "comfort": 7,
+        "location": 8,
+        "pacing": 3,
+        "food": 2,
+        "culture": 4,
+        "novelty": 0,
+        "reliability": 9
+      },
+      "weights_normalised": {
+        "cost": 0.1316,
+        "comfort": 0.1842,
+        "location": 0.2105,
+        "pacing": 0.0789,
+        "food": 0.0526,
+        "culture": 0.1053,
+        "novelty": 0.0,
+        "reliability": 0.2368
+      }
+    },
+    "behavioural": {
+      "age_band": "60_plus",
+      "party_type": "business",
+      "party_size": 2,
+      "communication_style": "formal",
+      "budget_usd": 8088.68,
+      "budget_flexibility": 0.561,
+      "initial_patience": 25,
+      "patience_decay_per_turn": 1.19,
+      "tech_savvy": 2,
+      "risk_tolerance": 3,
+      "reply_verbosity": 2
+    }
+  },
+  {
+    "difficulty": 0.75,
+    "what_the_agent_sees": {
+      "opening_request": "Japan, 7 nights, two of us. Budget ~$3,761. Somewhere comfortable, nothing that risks going wrong.",
+      "stated_axes": [
+        "comfort",
+        "reliability"
+      ]
+    },
+    "hidden_from_the_agent": {
+      "weights_0_to_9": {
+        "cost": 4,
+        "comfort": 8,
+        "location": 8,
+        "pacing": 6,
+        "food": 8,
+        "culture": 5,
+        "novelty": 3,
+        "reliability": 8
+      },
+      "weights_normalised": {
+        "cost": 0.08,
+        "comfort": 0.16,
+        "location": 0.16,
+        "pacing": 0.12,
+        "food": 0.16,
+        "culture": 0.1,
+        "novelty": 0.06,
+        "reliability": 0.16
+      }
+    },
+    "behavioural": {
+      "age_band": "45_59",
+      "party_type": "couple",
+      "party_size": 2,
+      "communication_style": "terse",
+      "budget_usd": 3761.1,
+      "budget_flexibility": 0.509,
+      "initial_patience": 29,
+      "patience_decay_per_turn": 1.573,
+      "tech_savvy": 6,
+      "risk_tolerance": 6,
+      "reply_verbosity": 0
+    }
+  },
+  {
+    "difficulty": 1.0,
+    "what_the_agent_sees": {
+      "opening_request": "Japan, 7 nights, 5 of us. Budget ~$5,816. We're into food.",
+      "stated_axes": [
+        "food"
+      ]
+    },
+    "hidden_from_the_agent": {
+      "weights_0_to_9": {
+        "cost": 5,
+        "comfort": 2,
+        "location": 8,
+        "pacing": 3,
+        "food": 6,
+        "culture": 5,
+        "novelty": 3,
+        "reliability": 2
+      },
+      "weights_normalised": {
+        "cost": 0.1471,
+        "comfort": 0.0588,
+        "location": 0.2353,
+        "pacing": 0.0882,
+        "food": 0.1765,
+        "culture": 0.1471,
+        "novelty": 0.0882,
+        "reliability": 0.0588
+      }
+    },
+    "behavioural": {
+      "age_band": "60_plus",
+      "party_type": "friends",
+      "party_size": 5,
+      "communication_style": "chatty",
+      "budget_usd": 5816.24,
+      "budget_flexibility": 0.215,
+      "initial_patience": 22,
+      "patience_decay_per_turn": 1.726,
+      "tech_savvy": 3,
+      "risk_tolerance": 4,
+      "reply_verbosity": 4
+    }
+  }
+]
