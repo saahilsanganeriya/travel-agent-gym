@@ -1,0 +1,48 @@
+{
+  "run_utc": "2026-08-11T07:23:40.394211+00:00",
+  "agent": "heuristic",
+  "client": "scripted",
+  "agent_model": null,
+  "client_model": null,
+  "endpoint": null,
+  "episodes": 3,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "trials_per_seed": 1,
+  "solve_rate": 0.3333,
+  "complete_rate": 0.3333,
+  "walk_rate": 0.6667,
+  "return_mean": -0.762,
+  "return_iqm": -0.762,
+  "return_std": 0.7876,
+  "mean_steps": 79.0,
+  "constraint_failure_rate": 0.0,
+  "mean_constraint_failures": 0.0,
+  "budget_used": 0.272,
+  "axes_elicited": 0.559,
+  "constraints_elicited": 1.0,
+  "client_turns_mean": 9.3,
+  "pass^1": 0.3333,
+  "pass^k": null,
+  "k": 1,
+  "solve_by_stratum": {
+    "0.2": 1.0,
+    "0.5": 0.0,
+    "0.8": 0.0
+  },
+  "parse_failures": 0,
+  "parse_failure_rate": 0.0,
+  "llm_call_failures": 0,
+  "tokens": {
+    "agent_prompt": 0,
+    "agent_completion": 0,
+    "client_prompt": 0,
+    "client_completion": 0
+  },
+  "cost_usd": 0.0,
+  "cost_usd_per_episode": 0.0,
+  "cost_source": "gateway-reported"
+}

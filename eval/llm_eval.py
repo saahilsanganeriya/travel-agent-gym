@@ -113,11 +113,32 @@ class HeuristicV2Policy:
         self.asked_axes: set[int] = set()
         self.empty_flight_searches = 0
         self.empty_hotel_searches = 0
+        self.banned_cities: set[Any] = set()
+        self.can_ban = True
+        self._reachable: set[Any] | None = None
 
     def reset(self) -> None:
         self.asked_axes = set()
         self.empty_flight_searches = 0
         self.empty_hotel_searches = 0
+        self.banned_cities = set()
+        self.can_ban = True
+        self._reachable = None
+
+    def _reachable_cities(self, core: Any) -> set[Any]:
+        """Cities with a nonstop in both directions from home.
+
+        Public information — it is the first thing any flight search shows — and skipping it
+        is how a route gets anchored on a city no aircraft serves, which no amount of
+        re-filtering the flight slate can fix.
+        """
+        if self._reachable is None:
+            origin = core.world.origin_airport
+            city_of = {a.key: a.city for a in core.world.airports}
+            out = {city_of[f.destination] for f in core.world.flights if f.origin == origin}
+            back = {city_of[f.origin] for f in core.world.flights if f.destination == origin}
+            self._reachable = out & back
+        return self._reachable
 
     def act(self, obs: dict, info: dict, env: Any) -> int:
         mask = info["action_mask"]
@@ -144,21 +165,32 @@ class HeuristicV2Policy:
         # 3. A route that uses every night, in one city that flights actually reach.
         # Which cities have an airport is public information in any travel search, and a
         # route anchored on a city with no gateway is unbookable however good the rest is.
+        # A city whose flight market turned out to be empty is unwound completely, not by one
+        # night: dropping a night and re-adding the same city is a two-turn infinite loop.
+        if any(city in self.banned_cities for city, _ in core.route):
+            a = first_legal(encode(Verb.DROP_CITY))
+            if a is not None:
+                return a
+
         allocated = sum(n for _, n in core.route)
         if allocated < core.nights:
             if not core.destination_slate:
                 a = encode(Verb.SEARCH_DESTINATIONS)
                 if mask[a]:
                     return a
-            gateways = {airport.city for airport in core.world.airports}
+            reachable = self._reachable_cities(core) - self.banned_cities
             preferred = [
                 encode(Verb.ADD_CITY, i)
                 for i, city in enumerate(core.destination_slate[:SLATE_K])
-                if city in gateways
+                if city in reachable
             ]
-            a = first_legal(*preferred) or first_legal(
-                *(encode(Verb.ADD_CITY, i) for i in range(SLATE_K))
-            )
+            a = first_legal(*preferred)
+            if a is None:
+                # Every reachable city has failed. Banning the last one too would just start
+                # an add/drop cycle, so give up on banning and take the least-bad option.
+                self.banned_cities.clear()
+                self.can_ban = False
+                a = first_legal(*(encode(Verb.ADD_CITY, i) for i in range(SLATE_K)))
             if a is not None:
                 return a
 
@@ -176,11 +208,16 @@ class HeuristicV2Policy:
             # Every preset returning nothing means the market, not the filter, is the
             # problem — the route's gateway is unreachable or unaffordable. Re-searching a
             # sixth time is the loop that eats an episode; unwind the route instead.
-            if self.empty_flight_searches >= len(FlightPreset):
+            if self.empty_flight_searches >= len(FlightPreset) and core.route and self.can_ban:
+                self.banned_cities.add(core.route[-1][0])
                 a = first_legal(encode(Verb.DROP_CITY))
                 if a is not None:
                     self.empty_flight_searches = 0
                     return a
+            if self.empty_flight_searches >= 2 * len(FlightPreset):
+                # Out of moves on flights: stop paying turns for the same empty market and
+                # spend what patience is left talking to the client instead.
+                return int(np.flatnonzero(mask)[0])
             preset = (
                 FlightPreset.MOST_RELIABLE
                 if reliability_w > 0.6
@@ -484,8 +521,10 @@ def main() -> None:
     parser.add_argument("--client-model", default=DEFAULT_CLIENT_MODEL)
     parser.add_argument("--base-url", default=None, help="override; defaults to LLM_BASE_URL")
     parser.add_argument("--rate-per-min", type=float, default=120.0)
-    parser.add_argument("--max-agent-calls", type=int, default=90)
-    parser.add_argument("--max-client-calls", type=int, default=40)
+    # One call per turn each, matching the environment's 90-turn cap: a budget below that
+    # silences the client mid-episode, which is a corrupted result rather than a saving.
+    parser.add_argument("--max-agent-calls", type=int, default=95)
+    parser.add_argument("--max-client-calls", type=int, default=95)
     parser.add_argument("--out", default="logs/llm_eval.json")
     parser.add_argument(
         "--dry-run",

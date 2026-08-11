@@ -87,6 +87,50 @@ distinguishable by saying which one you measured.
 
 ---
 
+## What the v2 training run is actually proving
+
+```
+random baseline (ret_iqm)   -0.378
+null   baseline (ret_iqm)   -0.360
+PPO @  69k steps            -0.898
+PPO @ 181k steps            -0.285      ep_len_mean 89.9  (the 90-turn cap)
+```
+
+The policy is improving and has passed both baselines. It is **not** learning to plan trips.
+`ep_len_mean` sits at 89.9 against a 90-turn cap, which means episodes are running to the
+cap instead of terminating — the policy is not reaching `BOOK` and `FINALIZE` at all.
+
+The reward table says why, and it is the most important defect in this repository:
+
+```
+null        -0.360      books nothing, so loses nothing
+random      -0.378      books nothing, so loses nothing
+heuristic   -1.321      builds a real trip, and is punished for it
+```
+
+**Doing nothing currently outscores doing the job.** A policy that books a plan absorbs
+disruption damage, forfeited value and constraint failures; a policy that stalls until the
+client walks pays only the patience forfeit and a little friction. Since v2's completion rate
+is 10%, most attempts end up partially failed, and the expected value of attempting is
+negative. PPO found that in 181k steps, which is exactly what a good optimiser should do to a
+reward shaped like this.
+
+This is the tau-bench failure mode reappearing in a new form. v1 explicitly defended against
+it — their do-nothing agent scores 38% on their own benchmark, and v1's `null` scored ~0 — but
+the defence did not survive v2, because v2 made failure *expensive* without making success
+*reliable*. Two ways out, in order:
+
+1. **Fix completion first.** At a 10% completion rate no reward shape saves this. The
+   incompleteness is the root cause and the reward asymmetry is downstream of it.
+2. **Then re-balance the terminal.** `PATIENCE_FORFEIT` at 1.0 is too cheap next to a
+   `DISRUPTION_SCALE` of 0.9 applied to damage that can reach 2.0. Walking away should be
+   the worst outcome available, not a floor an agent can retreat to.
+
+Recording this rather than shipping a curve that goes up and calling it learning. The curve
+does go up. What it is climbing toward is inaction.
+
+---
+
 ## The principle behind v2: harder ≠ noisier
 
 | change | effect | why |
