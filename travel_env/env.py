@@ -176,6 +176,7 @@ class TravelAgentEnv(gym.Env):
         self.disruption_damage_cents = 0
         self.forfeited_activity_value = 0.0
         self.seen_searches: set[int] = set()
+        self.illegal_attempts = 0
         self.transcript: list[tuple[str, str]] = [
             ("client", opening_request(self.persona, self.nights))
         ]
@@ -191,17 +192,46 @@ class TravelAgentEnv(gym.Env):
     def step(self, action: int) -> tuple[dict, float, bool, bool, dict]:
         act = decode(int(action))
         mask = self.action_masks()
-        if not mask[int(action)]:
-            # Unreachable when the caller honours the mask. A check a second code path can
-            # bypass is not a check, so we raise rather than silently no-op.
-            raise ValueError(
-                f"illegal action {int(action)} ({describe(int(action))}); "
-                "call action_masks() and sample within it"
-            )
-
         self.turn += 1
         redundant = False
         components = zero_components()
+
+        if not mask[int(action)]:
+            # An illegal action is a WASTED TURN, not an exception and not a reward
+            # penalty. Three reasons this is the right shape:
+            #   1. Robustness — `check_env` samples the action space without honouring the
+            #      mask (documented sb3-contrib behaviour), and so will any naive caller.
+            #      An env that raises is an env that fails standard validation.
+            #   2. Realism — the agent tried something impossible; the attempt still cost
+            #      the client's time.
+            #   3. It is not the penalty the masking literature warns about. There is no
+            #      negative reward term; the only cost is the turn itself, and a masked
+            #      policy never reaches this branch.
+            self.illegal_attempts += 1
+            self.patience -= self.persona.patience_decay_per_turn
+            terminated = self.client_walked or self.phase == 2
+            if self.patience <= 0 and self.phase == 0:
+                if self.ledger.active_bookings():
+                    self._begin_act_two()
+                else:
+                    self.client_walked = True
+                terminated = True
+            new_potential = self._potential(is_terminal=terminated)
+            reward, step_parts = step_reward(
+                prev_potential=self._prev_potential,
+                new_potential=new_potential,
+                redundant_search=True,
+            )
+            components.update(step_parts)
+            self._prev_potential = new_potential
+            if terminated:
+                term_reward, term_parts = terminal_reward(self._reward_inputs())
+                reward += term_reward
+                components.update(term_parts)
+                self.ledger.assert_reconciled()
+            info = self._info()
+            info.update(components)
+            return self._obs(), float(reward), bool(terminated), False, info
 
         match act.verb:
             case Verb.ASK:
@@ -709,6 +739,7 @@ class TravelAgentEnv(gym.Env):
             "axes_elicited": float(self.belief[:, 1].mean()),
             "disruption_damage_cents": int(self.disruption_damage_cents),
             "phase": int(self.phase),
+            "illegal_attempts": int(self.illegal_attempts),
             "stratum": float(self.difficulty),
         }
 

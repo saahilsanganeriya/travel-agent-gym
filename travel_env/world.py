@@ -51,6 +51,8 @@ from travel_env.contracts import (
 )
 
 _EARTH_RADIUS_KM = 6371.0
+_EPOCH = datetime(2027, 1, 1, tzinfo=UTC)
+"""Fixed origin for `World.generated_at`. See generate_world."""
 
 # Real coordinates and plausible district character. Values are hand-set rather than drawn
 # so that geography stays consistent across every seed — only prices, availability and
@@ -235,7 +237,9 @@ def generate_world(seed: int, *, trip_start: datetime | None = None, nights: int
     activities = _generate_activities(rng, season)
 
     return World(
-        seed=seed, generated_at=datetime.now(tz=UTC), cities=cities, airports=airports,
+        # Derived from the seed, NOT wall-clock: a timestamp here silently broke
+        # `generate_world(42) == generate_world(42)`, which is the whole determinism claim.
+        seed=seed, generated_at=_EPOCH + timedelta(seconds=seed), cities=cities, airports=airports,
         flights=flights, rail=rail, hotels=hotels, room_offers=room_offers, activities=activities,
     )
 
@@ -408,11 +412,17 @@ def _generate_lodging(
                     (BoardType.BREAKFAST, 1.14),
                     (BoardType.HALF_BOARD, 1.34),
                 ):
+                    # Draw noise ONCE per (hotel, board), then apply the plan multiplier
+                    # on top. Drawing it per plan let noise invert the ordering, so a
+                    # non-refundable room could cost MORE than the flexible one for the
+                    # same room — which destroys the act I / act II tradeoff that the
+                    # rate-plan structure exists to create. Caught by test_free_
+                    # cancellation_rooms_cost_more_than_non_refundable.
+                    noise = float(rng.normal(1.0, 0.13))
                     for plan, plan_mult in (
                         (RatePlan.NON_REFUNDABLE, 0.85),
                         (RatePlan.FREE_CANCELLATION, 1.0),
                     ):
-                        noise = float(rng.normal(1.0, 0.13))
                         price = int(
                             base_nightly * district.price_index * board_mult * plan_mult
                             * season * max(0.55, noise)

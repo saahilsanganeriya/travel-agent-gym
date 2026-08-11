@@ -3,5 +3,6 @@ __pycache__/
 *.pyc
 logs/*
 !logs/published/
-models/
+models/*
+!models/v1_ppo/
 .env
