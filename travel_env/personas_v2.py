@@ -150,11 +150,13 @@ def draw_persona(
     age_patience_offset = {
         AgeBand.YOUNG_ADULT: +6, AgeBand.ADULT: +3, AgeBand.MIDLIFE: 0, AgeBand.SENIOR: -4,
     }[age_band]
-    # v2 trajectories are longer than v1's: a route has to be built, constraints elicited and
-    # ground legs booked. Patience is scaled to the shortest competent trajectory (~28 turns)
-    # rather than to v1's (~14), or a hard episode would be unwinnable rather than hard.
+    # MEASURED, not guessed. The first v2 calibration used 56 and every policy walked out:
+    # random 97%, heuristic 90%. A v2 trajectory is ~46 turns (route, four constraint
+    # questions, two flights, ground hops, lodging per city, activities, propose/book/close)
+    # against v1's ~14, so patience has to cover it or the environment sits in the
+    # no-signal band for a reason that has nothing to do with skill.
     initial_patience = max(
-        26, int(round(56 + age_patience_offset - 14 * difficulty + rng.normal(0, 3)))
+        60, int(round(112 + 2 * age_patience_offset - 26 * difficulty + rng.normal(0, 5)))
     )
 
     tech_savvy = _clamp_level(
@@ -177,7 +179,7 @@ def draw_persona(
         budget_cents=budget,
         budget_flexibility=float(min(1.0, max(0.0, rng.beta(2.0, 3.0)))),
         initial_patience=initial_patience,
-        patience_decay_per_turn=float(min(3.0, max(0.4, 1.0 + rng.normal(0.0, 0.25) + 0.6 * difficulty))),
+        patience_decay_per_turn=float(min(2.2, max(0.5, 1.0 + rng.normal(0.0, 0.2) + 0.45 * difficulty))),
         tech_savvy=tech_savvy,
         risk_tolerance=_clamp_level(rng.normal(4.5, 2.0)),
         reply_verbosity=_clamp_level(verbosity_base - 2.5 * difficulty + rng.normal(0, 1.0)),
