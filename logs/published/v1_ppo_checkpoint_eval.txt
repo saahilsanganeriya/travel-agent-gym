@@ -1,0 +1,3 @@
+
+24 episodes  |  mean return +0.1263 ± 0.562  |  solve rate 88%
+random baseline is ≈ -1.00 for comparison

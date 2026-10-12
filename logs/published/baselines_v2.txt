@@ -1,0 +1,7 @@
+policy             solve   ret_iqm  complete   walk  steps  prefs  hard_q  cfail
+null                0.00   -0.3600      0.00   0.00   90.0   0.33    0.00   0.00
+random              0.00   -0.3782      0.00   0.13   89.5   0.91    0.99   0.00
+greedy_cheapest     0.00   -1.7207      0.00   0.63   82.1   0.25    0.00   0.00
+greedy_quality      0.00   -1.7230      0.00   0.63   82.1   0.25    0.00   0.00
+heuristic           0.05   -1.3175      0.08   0.47   83.7   0.57    0.00   0.02
+expert              0.02   -1.1827      0.03   0.42   85.0   0.57    1.00   0.00

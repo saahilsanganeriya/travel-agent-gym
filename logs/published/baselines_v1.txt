@@ -1,0 +1,16 @@
+policy                solve_rate    return_iqm   return_mean complete_rate     walk_rate    mean_steps mean_elicited   budget_used
+----------------------------------------------------------------------------------------------------------------------------------
+null                         0.0       -1.0097       -0.8685           0.0        0.6667          50.5         0.359           0.0
+random                     0.125       -1.1405       -0.9158          0.25        0.8333          30.6         0.503         0.059
+greedy_cheapest              0.0       -1.3002       -1.2893           0.0        0.9583          26.4          0.25           0.0
+greedy_quality               0.0       -1.3115       -1.3047           0.0        0.9583          26.4          0.25           0.0
+heuristic                   0.75          0.11       -0.1886          0.75          0.25          47.0         0.579          0.57
+
+solve rate by difficulty stratum:
+  null              {'0.2': 0.0, '0.5': 0.0, '0.8': 0.0}
+  random            {'0.2': 0.125, '0.5': 0.125, '0.8': 0.125}
+  greedy_cheapest   {'0.2': 0.0, '0.5': 0.0, '0.8': 0.0}
+  greedy_quality    {'0.2': 0.0, '0.5': 0.0, '0.8': 0.0}
+  heuristic         {'0.2': 0.875, '0.5': 0.5, '0.8': 0.875}
+
+targets: random ~0% · heuristic ~30% · near 0% no signal, near 100% nothing to learn
