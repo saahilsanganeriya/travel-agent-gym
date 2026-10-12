@@ -1,283 +1,203 @@
-# AI Travel Agent — an RL training environment
+# travel-agent-gym
 
-A Gymnasium environment in which an agent runs an end-to-end client engagement at a
-mid-size travel agency: interview the client, decide where the trip actually goes, search
-inventory, compose an itinerary that survives contact with a clock, get it approved, book
-it — and then **the trip happens**, and things go wrong.
+A client writes in: "family of four, Japan in spring, around $4k." They do not mention that one
+of them uses a wheelchair, or that food matters to them more than anything else. A good travel
+agent finds that out before booking. A bad one books the cheapest flight and the best-rated
+hotel, and the trip falls apart in week two.
 
-Two environments are registered, and both work:
+This repository is a reinforcement-learning environment built around that job. An agent
+interviews a client whose preferences are hidden, searches inventory, builds an itinerary that
+has to fit a real clock, books it against a budget, and then the trip actually happens and a
+disruption engine fires. The reward is the trip the client actually got, not the plan.
 
-| id | what it is | why it still exists |
+It is a [Gymnasium](https://gymnasium.farama.org/) environment, so a standard RL algorithm
+(MaskablePPO here) can train on it, and the same action set is rendered as tool calls so an
+LLM agent can play it too.
+
+**Status, plainly:** the first world (v1) turned out too easy. The second world (v2) fixed the
+part that mattered and then overshot: today it is too hard for the reasons explained in
+[Where v2 overshot](#where-v2-overshot). Both worlds run. The 98 tests cover v1; v2 has its
+baselines and a world-coherence check. The numbers below are re-measured from this code.
+
+## What happens in one episode
+
+```
+ Act I: plan and book                                   Act II: the trip
+ ─────────────────────────────────────────────────      ──────────────────────────────
+ client's opening line (reveals 1-3 of 8 preferences)
+        │
+        ▼
+ INTERVIEW ──► ask about preferences and the party      disruption engine fires, but
+        │      (patience drops every turn)              only on what was booked:
+        ▼
+ SEARCH ─────► slates of up to 8 options                  flight delayed
+        │      (flights, rail, ferries, hotels,             └► missed connection
+        │       activities; filters, not sort orders)           └► late arrival
+        ▼                                                          └► hotel no-show
+ ITINERARY ──► every segment must fit the clock:
+        │      a.end + transfer(a, b) <= b.start        a cheap non-refundable fare with
+        ▼                                               a 45-minute connection now costs
+ BOOK ───────► integer-cent ledger; overspending        what it really costs
+        │      is not penalised, it is impossible
+        ▼                                                         │
+ FINALIZE ──────────────────────────────────────────────►  terminal reward
+```
+
+| Part | What it does | Where |
 |---|---|---|
-| `travel_agent/TravelAgent-v2` | **the environment.** 3 regions, 13 cities, 5 transport modes, hard constraints, a real timeline | the default everywhere |
-| `travel_agent/TravelAgent-v0` | frozen v1: one rail corridor, 3 cities | its trained checkpoint is the evidence the reward carries learnable signal |
+| Interview | The client has eight hidden preference weights (cost, comfort, location, pacing, food, culture, novelty, reliability) and, in v2, a hidden party: each traveller's age, passport, access needs and diet. Patience runs down every turn, and the client can walk out. | `travel_env/personas.py`, `personas_v2.py`, `client_sim.py` |
+| Search | Each search returns a fixed-width slate of candidates, and the agent selects by index. Presets are different candidate sets, not different sort orders. | `travel_env/actions.py`, `actions_v2.py` |
+| Itinerary | One inequality on a timeline replaces a pile of special cases: over-packed days, moving cities without a booked leg, a tour that starts before the flight lands. | `travel_env/timeline.py`, `itinerary.py`, `clock.py` |
+| Booking | An authoritative ledger in integer cents. Illegal actions (over budget, wrong city, museum closed that day) are removed by the action mask, never punished. | `travel_env/ledger.py`, `env_v2.py` |
+| Disruption engine | Act II runs the booked trip. Delays, cancellations, overbooking, weather and strikes fire conditionally on what was booked, and a delay cascades through the timeline as far as it really reaches. | `travel_env/disruptions.py`, `env_v2.py` |
 
-## The measurement that drove v2
+## Two worlds
 
-v1 produced this:
+| | v1 (`travel_agent/TravelAgent-v0`) | v2 (`travel_agent/TravelAgent-v2`, the default) |
+|---|---|---|
+| Geography | Tokyo, Kyoto, Osaka; 14 hand-set districts | Japan, Italy, Thailand; 13 cities, 43 districts; one or two regions per episode (two means an open-jaw route) |
+| Transport | flights and one rail corridor | flight, rail, bus, ferry, car hire on local timetables; Thailand's ferries cancel in the monsoon |
+| Lodging | hotels | 7 types (hotel, ryokan, hostel, apartment, capsule, resort, guesthouse) with real occupancy rules |
+| Time | had three silent timezone bugs | UTC offsets from `zoneinfo`, arrivals derived from distance; `clock.assert_world_coherent` checks every instant, leg and duration (it passes on 50 generated worlds, but the tests do not run it yet) |
+| Travel times | a haversine rule | 108 real Google Distance Matrix pairs, fetched once into `data/transfer_matrix.json`; nothing calls the network inside `step()` |
+| Hard constraints | none | accessibility, capacity and documents: masked once the agent has asked, unmasked (and fatal at travel time) if it has not |
+| Actions | `Discrete(63)` | `Discrete(89)` |
+
+v1 is kept, unchanged, because its trained checkpoint (`models/v1_ppo/`) is the evidence that
+the reward carries a learnable signal.
+
+The synthetic world is correlated on purpose. Price tracks a hotel's true quality plus noise.
+Displayed ratings are noisier when a hotel has few reviews, so sorting by rating picks lucky
+small-sample hotels and overpays (measured over 200 worlds in `data/world_stats.md`). The
+cheap, well-located seats and rooms are often the ones already gone. A sample world and ten sample clients,
+hidden weights included, are in `data/`.
+
+## Reward
 
 ```
-policy            solve_rate  return_iqm  complete  walk_rate  steps  elicited
-null                    0.00     -1.0097      0.00       0.67   50.5     0.359
-random                  0.25     -1.1373      0.21       0.83   33.2     0.523
-greedy_cheapest         0.00     -1.3002      0.00       0.96   26.4     0.250
-greedy_quality          0.00     -1.3123      0.00       0.96   26.4     0.250
-heuristic               0.96     +0.1048      0.96       0.04   58.4     0.593
+per turn:   Φ(s_t) − Φ(s_{t−1})  −  friction
+terminal:   realised client utility + budget efficiency − disruption damage − patience forfeit
 ```
 
-The good news is real and survives into v2: **both obvious exploits — "always book
-the cheapest flight" and "always pick the highest-rated hotel" — score zero, and neither has
-a penalty term written against it.** They lose because the environment makes them bad bets.
+The shaping term is a potential difference, with Φ = 0 at termination and at truncation, so it
+cannot change which policy is optimal. There is no LLM anywhere in the reward: it is integer
+arithmetic over the ledger, and the same seed gives the same reward. Every component is
+reported separately in `info`.
 
-The bad news is the reason v2 exists. A uniformly random policy solved **one episode in
-four**, and a hand-written heuristic solved **96%**. The targets were random near zero and
-the heuristic near 30%, low enough to leave a learned policy room to beat it. Both missed.
+The two obvious exploits score zero without a penalty term written against either:
 
-Random solving 25% is the more damning number, because it says the task can be completed by
-accident — the space of legal plans was too small to get lost in.
+| Exploit | Why it loses |
+|---|---|
+| Always book the cheapest flight | Act II makes cheap and fragile lose in expectation |
+| Always pick the highest-rated hotel | Ratings from few reviews are noisy, and price tracks real quality |
+| Book without asking | The weights are hidden, so an unasked booking is a bet on a prior |
+| Ask forever | Patience runs out and the client walks |
 
-## Where v2 actually landed — measured, 60 frozen seeds
+## Baselines
+
+Six scripted policies. `null` does nothing. `random` picks uniformly among legal actions.
+`greedy_cheapest` and `greedy_quality` are the two exploits. `heuristic` interviews the client
+on preferences, then searches and books. `expert` (v2 only) is the heuristic plus four
+questions about the party's hard constraints.
+
+**v1**, 24 seeds, from [`logs/published/baselines_v1.txt`](logs/published/baselines_v1.txt)
+(`python -m eval.harness 24`):
 
 ```
-policy             solve   ret_iqm  complete   walk  steps  prefs  hard_q  cfail
-null                0.00   -0.3600      0.00   0.00   90.0   0.33    0.00   0.00
-random              0.00   -0.3782      0.00   0.13   89.5   0.91    0.99   0.00
-greedy_cheapest     0.00   -1.7207      0.00   0.63   82.1   0.25    0.00   0.00
-greedy_quality      0.00   -1.7230      0.00   0.63   82.1   0.25    0.00   0.00
-heuristic           0.07   -1.3215      0.10   0.47   83.7   0.57    0.00   0.02
-expert              0.03   -1.1578      0.05   0.40   85.3   0.57    1.00   0.00
+policy             solve   return_iqm   complete   walk_rate   steps
+null               0.00      -1.0097        0.00       0.67     50.5
+random             0.125     -1.1405        0.25       0.83     30.6
+greedy_cheapest    0.00      -1.3002        0.00       0.96     26.4
+greedy_quality     0.00      -1.3115        0.00       0.96     26.4
+heuristic          0.75      +0.1100        0.75       0.25     47.0
 ```
 
-| | v1 | v2 | verdict |
-|---|---|---|---|
-| random | 0.25 | **0.00** | ✅ the fix that mattered |
-| greedy_cheapest / greedy_quality | 0.00 | 0.00 | ✅ held |
-| heuristic | 0.96 | **0.07** | ❌ overshot past the band |
+The committed MaskablePPO checkpoint solves 88% of 24 episodes (seeds 5000–5023) with mean
+return +0.126 ([`logs/published/v1_ppo_checkpoint_eval.txt`](logs/published/v1_ppo_checkpoint_eval.txt)).
+Its training run went from −1.02 to +0.133 mean episode reward over 516k steps, with a best
+evaluation of 0.36 ± 0.11 at 400k steps (`logs/published/v1_ppo_train.log`, lines 6, 3736 and
+2901).
 
-**The real win.** Random went from solving one episode in four to solving none. That was v1's
-more damning number, because it meant the task could be completed *by accident*, and widening
-the world fixed it exactly as predicted: a coherent multi-region route with a correct
+That is the problem with v1. Random solved one episode in eight and completed one in four,
+so the task could be finished by accident. A hand-written heuristic solved three in four, and
+a learned policy nearly nine in ten. My targets were random near zero and the heuristic near
+30%: low enough that a learned policy has something to find, high enough that success is
+not so rare a learner never sees it. v1 missed both.
+
+**v2**, 60 seeds, from [`logs/published/baselines_v2.txt`](logs/published/baselines_v2.txt)
+(`python eval/run_v2.py 60`):
+
+```
+policy             solve   ret_iqm   complete   walk   steps   prefs   hard_q   cfail
+null                0.00   -0.3600       0.00   0.00    90.0    0.33     0.00    0.00
+random              0.00   -0.3782       0.00   0.13    89.5    0.91     0.99    0.00
+greedy_cheapest     0.00   -1.7207       0.00   0.63    82.1    0.25     0.00    0.00
+greedy_quality      0.00   -1.7230       0.00   0.63    82.1    0.25     0.00    0.00
+heuristic           0.05   -1.3175       0.08   0.47    83.7    0.57     0.00    0.02
+expert              0.02   -1.1827       0.03   0.42    85.0    0.57     1.00    0.00
+```
+
+`prefs` is the share of preference axes the policy found out; `hard_q` is the share of
+hard-constraint classes it asked about; `cfail` is the share of trips that broke a constraint
+at travel time.
+
+## Where v2 overshot
+
+```
+                 v1      v2      target
+random          12.5%    0%      ~0%        fixed: no more solving by accident
+heuristic       75%      5%      ~30%       overshot, and for the wrong reason
+```
+
+Random going to zero is the real win. A coherent multi-region route with a correct
 night-by-night allocation is not something a uniform policy stumbles into.
 
-**The honest failure.** 7% is too low to learn from — almost no success signal — the wrong end of
-the same problem v1 had. And the reason is **not** "the task became appropriately hard":
+The heuristic at 5% is a failure, and not because the task became appropriately hard. Its
+`complete` is 0.08: it is failing to finish trips, not making bad choices. Steps sit at 82–90
+against a 90-turn cap. Two causes were found and fixed during development (no budget reserve
+for the return leg, so one outbound flight could eat 97% of the budget, and a heuristic that
+repeated the same empty search). Completion is still low. Raising the turn cap from 90 to 150
+made it worse, because patience then ran out first (the measurement is recorded next to
+`MAX_TURNS` in `travel_env/env_v2.py`).
 
-`complete` is 0.10. The heuristic is not losing on judgement, it is failing to finish. Two
-causes were found and fixed, and one remains:
+Two consequences follow, and both are open:
 
-- *Fixed — no budget reserve.* v1 reserved minimum lodging out of the flight budget. v2
-  dropped it, so an outbound leg could consume 97% of the budget (measured: 839,645 of
-  867,298) and every later selection was masked off. Diagnosed from a rollout that spent
-  **76 of 90 turns re-running the same flight search.**
-- *Fixed — the heuristic repeated an identical search.* A slate with nothing affordable on it
-  produced the same query every turn. A real agent widens the net; it now tries each preset
-  once.
-- *Not fixed.* Completion is still 10%. Raising the turn cap 90 → 150 made things **worse**
-  (walk rate 0.47 → 0.80, completion unmoved), which is itself the useful finding: turns and
-  patience are two spellings of one budget, and neither is the blocker.
+- **Interviewing does not yet pay.** `expert` asks about every hard constraint and scores
+  inside noise of `heuristic` (2% against 5%), because neither finishes. v2's central idea is
+  built, and this measurement does not yet show it working.
+- **Doing nothing is the best policy.** `null` scores −0.360 and `heuristic` −1.318: a policy
+  that books a trip absorbs disruption damage and constraint failures, and one that stalls
+  pays only the patience forfeit. PPO found this. Its training reward converged to −0.00005
+  with episodes running to 89.9 of 90 turns, so it never books
+  (`logs/published/v2_ppo_train.log`, lines 4326–4327; the deterministic evaluation at 500k
+  steps is −0.68 ± 0.65, line 4304). The curve goes up. What it climbs toward is inaction.
 
-`expert` — the heuristic plus the four constraint questions — is the reference for what
-interviewing is worth. Today it is inside noise of `heuristic` (0.03 vs 0.07), so **the
-central claim of v2 is currently unproven**: the mechanism is built and the measurement does
-not yet demonstrate it pays. That gap is the first thing to close.
+The fix order matters. Completion comes first: at 8% completion no reward shape saves this.
+Then the terminal needs rebalancing, because a `PATIENCE_FORFEIT` of 1.0 is cheap next to a
+`DISRUPTION_SCALE` of 0.9 applied to damage that can reach 2.0 (`travel_env/rewards.py`).
+Walking away should be the worst outcome, not a floor to retreat to.
 
-This is recorded rather than tuned until a number looked right. An environment that is hard
-because the agent cannot complete the task is not hard, it is broken, and the two are only
-distinguishable by saying which one you measured.
+**A note on the history.** Commit messages and earlier versions of this README record a v1
+heuristic at 96% and a v2 heuristic at 7%. Re-running the committed code, on any seed count I
+tried and with the original library versions, gives 67–83% for v1 and 5% for v2; the "random
+solves 25%" figure came from the test suite's 12-seed sample. The tables above are the re-run
+(Linux x86-64, Python 3.12, NumPy 2.5, Gymnasium 1.4). The conclusions do not change.
 
----
+## The LLM path
 
-## What the v2 training run is actually proving
+`travel_env/llm_agent.py` turns the observation and action mask into tool schemas, so an LLM
+agent is only ever offered legal actions. `travel_env/client_sim.py` plays the client with an
+LLM whose context holds the persona as prose and the transcript, never the world, the ledger
+or the weights as numbers. Agent and client are independent switches, so all four
+combinations run, and `--dry-run` makes no network calls
+([`logs/published/llm_eval_dryrun.json`](logs/published/llm_eval_dryrun.json)).
 
-```
-random baseline (ret_iqm)   -0.378
-null   baseline (ret_iqm)   -0.360
-PPO @  69k steps            -0.898
-PPO @ 181k steps            -0.285
-PPO @ 500k steps            -0.00005     ep_len_mean 89.9  (the 90-turn cap)
-```
-
-The run finished at 500k steps having converged to almost exactly zero, which is the
-do-nothing score, making the trained policy the BEST policy in the environment (0.000 vs
-heuristic -1.321). It passed both baselines. It is **not** learning to plan trips.
-`ep_len_mean` sits at 89.9 against a 90-turn cap, which means episodes are running to the
-cap instead of terminating — the policy is not reaching `BOOK` and `FINALIZE` at all.
-
-The reward table says why, and it is the most important defect in this repository:
-
-```
-null        -0.360      books nothing, so loses nothing
-random      -0.378      books nothing, so loses nothing
-heuristic   -1.321      builds a real trip, and is punished for it
-```
-
-**Doing nothing currently outscores doing the job.** A policy that books a plan absorbs
-disruption damage, forfeited value and constraint failures; a policy that stalls until the
-client walks pays only the patience forfeit and a little friction. Since v2's completion rate
-is 10%, most attempts end up partially failed, and the expected value of attempting is
-negative. PPO found that in 181k steps, which is exactly what a good optimiser should do to a
-reward shaped like this.
-
-This is the tau-bench failure mode reappearing in a new form. v1 explicitly defended against
-it — their do-nothing agent scores 38% on their own benchmark, and v1's `null` scored ~0 — but
-the defence did not survive v2, because v2 made failure *expensive* without making success
-*reliable*. Two ways out, in order:
-
-1. **Fix completion first.** At a 10% completion rate no reward shape saves this. The
-   incompleteness is the root cause and the reward asymmetry is downstream of it.
-2. **Then re-balance the terminal.** `PATIENCE_FORFEIT` at 1.0 is too cheap next to a
-   `DISRUPTION_SCALE` of 0.9 applied to damage that can reach 2.0. Walking away should be
-   the worst outcome available, not a floor an agent can retreat to.
-
-Recording this rather than shipping a curve that goes up and calling it learning. The curve
-does go up. What it is climbing toward is inaction.
-
----
-
-## The tau-bench path, run live
-
-`openai/gpt-5-mini` as the agent against `openai/gpt-4.1-mini` as the client, on an
-OpenAI-compatible gateway. Two episodes, gateway-reported cost:
-
-```
-endpoint      OpenAI-compatible gateway     cost_usd/episode   0.0958
-solve_rate            0.00      axes_elicited          0.907
-complete_rate         0.00      constraints_elicited   1.000
-mean_steps           90.0       parse_failure_rate     0.35
-tokens  agent 136,120 prompt / 72,185 completion · client 40,649 / 1,192
-```
-
-**The agent behaves the way the environment is designed to reward.** It elicits 91% of the
-preference axes and **100% of the hard-constraint classes** — against the hand-written
-heuristic's 57% and **0%**. Nothing told it to; the tool descriptions say constraints must be
-asked about before search can filter on them, and it worked that out.
-
-**And it still completes 0% of trips**, exactly like every other policy. That is the most
-useful single result here: an LLM agent doing the *right* thing qualitatively, and still
-hitting the same wall, is strong evidence the 10% completion ceiling is a defect in the
-**environment** rather than a limitation of the agents being measured against it.
-
-Two caveats, both mine rather than the model's. `parse_failure_rate` 0.35 and 60 call
-failures are the per-episode call budget (60) running out across a 90-step episode, not
-malformed output — raise the budget or shorten the episode. And `client_fallbacks` 122 means
-the client simulator hit its own 15-call cap and fell back to scripted replies for most of
-the conversation, so this run does not yet test the LLM client properly.
-
-A bug worth recording: the first live run reported `parse_failure_rate 1.0` and 180 call
-failures with **zero tokens**, and printed a clean `-0.36` that looked exactly like a policy
-choosing to do nothing. The cause was that `run_episode` armed the client's per-episode call
-budget but never the agent's, so every agent call was refused before it was sent and the
-harness silently fell back to first-legal-action. A silent fallback that looks like a result
-is the worst failure mode an eval harness has, which is why `parse_failure_rate`,
-`llm_call_failures` and token counts are all reported rather than summarised away.
-
----
-
-## The principle behind v2: harder ≠ noisier
-
-| change | effect | why |
-|---|---|---|
-| more price noise, wider distributions, random failures | **unfair** | outcome variance swamps skill; the reward stops discriminating |
-| more places, modes, and interacting rules | **hard** | there is a right answer and finding it takes work |
-
-Every addition below had to pass one test: *would a better travel agent reliably beat a
-worse one at it?* If yes it is complexity. If it only widens the outcome distribution for
-everybody, it is noise, and it was not added.
-
----
-
-## What v2 added
-
-**A world with structure, not just more of the same.** Three regions that differ in kind,
-not degree:
-
-| | Japan | Italy | Thailand |
-|---|---|---|---|
-| intercity | superb rail | one fast spine, thin off it | poor rail; ferries and domestic air |
-| price level | high | high | **0.45×** — a budget goes twice as far |
-| peak | sakura, kōyō | high summer | cool-dry, Dec–Feb |
-| weather risk | typhoon Aug–Oct | autumn rain | **monsoon Jun–Oct, and it cancels ferries** |
-| visas | free for some passports, weeks of lead for others | Schengen | free or on arrival for most |
-
-An episode draws one region or two; two means an open-jaw, which a random policy cannot
-stumble into. Thailand's cheapest months are its wettest, so the budget option carries the
-ferry risk — seasonality is coupled to reliability rather than being a flat multiplier.
-
-**A clock that is actually correct.** v1 had three silent time bugs, all invisible to
-`check_env`:
-
-- `local_departure_hour = (dep.hour + 9) % 24` applied *Tokyo's* offset to a *San Francisco*
-  departure — every long-haul leg was wrong by 16 hours.
-- Activity opening hours are local, but the scheduler compared them against a UTC day base:
-  a nine-hour shift that made evening venues look like morning ones.
-- Every booking's `service_date` was `trip_start.date()`, so a day-five hotel night recorded
-  as day zero and every date-keyed rule fired on the wrong day.
-
-v2 resolves UTC offsets from real `zoneinfo` data once and freezes them onto the city,
-derives every arrival as departure-plus-duration, and derives duration from real distance.
-`clock.assert_world_coherent` then proves it: instants inside the window, arrival after
-departure, declared duration matching the clock, and no leg faster or slower than its mode
-can travel. **It caught a generator fault on its first run** — 96 SFO→SFO flights, because
-the origin airport had been declared as one of Tokyo's.
-
-**A world graph instead of a pile of checks.** One inequality:
-
-```
-for consecutive segments (a, b):
-    a.end_utc + transfer(a.place_out, b.place_in) <= b.start_utc
-```
-
-That subsumes over-packed days, an activity in Kyoto after an activity in Tokyo with no
-booked leg between them, a 09:00 tour after a flight landing at 11:00, hotel check-in
-cutoffs, and an overnight bus substituting for a hotel night. **Act II needs no separate
-cascade logic at all**: a delay shifts one arrival forward and everything downstream that no
-longer satisfies the inequality is simply missed. The cascade is therefore arbitrarily deep
-and always consistent with what was actually booked — which is the fix for v1's cascade
-being one level deep and partly random.
-
-**Hard constraints, and the mechanic that makes interviewing pay.** The party is now a
-manifest of people — each with an age, a passport, access needs and dietary needs — and it
-is hidden exactly like the utility weights. The opening request says "family of four", not
-"one of us uses a wheelchair".
-
-> A constraint the agent has **asked about** is enforced by the action mask, so a
-> well-informed agent cannot fumble. A constraint it has **not** asked about is not masked —
-> the agent can book the inaccessible hotel — and it fails at travel time.
-
-So the cost of not interviewing the client is not a penalty term. It is a trip that does not
-work. Accessibility is also distributed *geographically* (Venice 0.16–0.20 step-free, Kyoto's
-Higashiyama 0.22, Marunouchi 0.92), so it interacts with the location preference instead of
-sitting beside it: a client who wants Gion **and** needs step-free access is a genuinely
-constrained problem rather than a filtered list.
-
-**Inventory that moves while you dither.** Seats and rooms deplete on a clock, and the
-falling number is *visible* in the observation — so losing an option is a consequence of
-your own slowness, not a trap. Fares drift too, and the slate you searched ten turns ago is
-stale; re-searching costs a turn. That asymmetry (depletion visible, drift hidden) is a
-deliberate fairness line.
-
-**Geography that is measured, not modelled.** `data/transfer_matrix.json` holds 108 real
-Google Distance Matrix pairs, fetched **once** by `scripts/fetch_transfer_matrix.py` and
-never called at runtime — a network call inside `step()` would destroy determinism and add
-tail latency to a function that runs millions of times. v1's single haversine rule was about
-twice as pessimistic as reality (Gion→Arashiyama: 69 min modelled, **37 measured**), which
-made feasible days look infeasible. Where the matrix has no entry the fallback is a per-city
-transit profile, because one global detour factor is what made Venice look like Tokyo.
-
----
-
-## Raising versus scoring
-
-A rule worth stating because it is easy to get backwards:
-
-- **Nothing the agent does raises.** A plan that does not fit in time is not an error, it is
-  a worse trip: the party cannot be there, so the thing does not happen and its value
-  evaporates. `Timeline.violations()` returns a list and never raises.
-- **Generator faults raise.** A flight that arrives before it departs is a bug in this
-  repository, not a decision. Scoring the agent for it would be grading it for someone
-  else's mistake. `assert_world_coherent` and `Ledger.assert_reconciled` both raise.
-
----
+One short live run (two episodes, `gpt-5-mini` as the agent, `gpt-4.1-mini` as the client)
+found 91% of preference axes and asked about 100% of hard-constraint classes, against the
+heuristic's 57% and 0%, and still completed no trips. Its raw output was not saved; the
+numbers are in the commit "Fix the LLM eval call-budget bug; record the first working live
+run". An LLM doing the right thing and hitting the same wall points at the environment, not
+the agents.
 
 ## Quick start
 
@@ -285,228 +205,30 @@ A rule worth stating because it is easy to get backwards:
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -e ".[train,dev]"
 
-PYTHONPATH=. .venv/bin/python scripts/smoke.py       # one rendered episode
-PYTHONPATH=. .venv/bin/python -m eval.harness 24     # the baseline table
+PYTHONPATH=. .venv/bin/python scripts/smoke.py            # one rendered episode
+PYTHONPATH=. .venv/bin/python -m eval.harness 24          # v1 baseline table
+PYTHONPATH=. .venv/bin/python eval/run_v2.py 60           # v2 baseline table
+PYTHONPATH=. .venv/bin/python -m pytest tests             # 98 invariant tests (v1)
+PYTHONPATH=. .venv/bin/python scripts/play_trained.py     # watch the v1 checkpoint play
 PYTHONPATH=. .venv/bin/python scripts/train.py --steps 400000 --n-envs 10
-tensorboard --logdir logs
-
-# optional, one-off, needs GOOGLE_MAPS_API_KEY in .env (see .env.example)
-PYTHONPATH=. .venv/bin/python scripts/fetch_transfer_matrix.py
 ```
 
----
+Everything above runs offline with no keys. Two optional paths need one: the LLM agent and
+client (`LLM_API_KEY` and `LLM_BASE_URL` for any OpenAI-compatible gateway, or
+`OPENROUTER_API_KEY`), and the one-off rebuild of the travel-time matrix
+(`GOOGLE_MAPS_API_KEY`). Copy `.env.example` to `.env` to set them.
 
-## 1. Why Gymnasium
+## Layout
 
-A bespoke interface was an option. Gymnasium was chosen, with a caveat worth
-stating because it cuts against the choice.
-
-**For:** `reset(seed, options) → (obs, info)` and `step(action) → (obs, reward, terminated,
-truncated, info)` are the de-facto standard. Adopting them costs nothing and buys seeding
-and reproducibility semantics, the wrapper stack (`TimeLimit`, `RecordEpisodeStatistics`),
-vectorization, `check_env`, and instant legibility to a reader.
-
-**Against, honestly:** every major LLM-agent environment framework — OpenEnv, GEM,
-SkyRL-Gym, NVIDIA NeMo Gym — kept the `reset`/`step` vocabulary but **none of them subclass
-`gymnasium.Env` or use `gymnasium.spaces`**. The universally discarded piece is `spaces`,
-and the reason is concrete: `spaces.Text`'s default charset is 62 alphanumerics with no
-space character, so `Text(50).contains("hello world")` is `False`. Composite spaces cannot
-cleanly hold a chat transcript.
-
-**Why Gymnasium anyway:** those frameworks target LLM agents *only*. This environment has to
-be trainable by a standard RL algorithm **and** drivable by an LLM. The `spaces` problem is
-sidestepped entirely by never putting language in a space — language lives in `info` and in
-the adapter, and the space carries numbers. Farama's own docs concede `Env` is *"not a
-perfect reconstruction"* of an MDP, which is the licence to layer an adapter on top rather
-than invent an interface.
-
-The proof this was the right call is that a MaskablePPO policy trains on this environment
-today, and the same masked action set renders as a tool schema for an LLM agent.
-
----
-
-## 2. The world
-
-Fourteen hand-set districts across Tokyo, Kyoto and Osaka, each with real coordinates and a
-five-axis character vector (walkability, nightlife, dining, culture, quiet) plus a price
-index. **Geography is authored and frozen across seeds; everything else is generated.** So
-an agent can learn that Ginza is expensive and Arashiyama is quiet — real transferable
-knowledge — but cannot memorise which hotel is cheap.
-
-**Kyoto has no airport.** You fly to Tokyo or Osaka and take rail. That is a structural
-constraint, not trivia: an agent that treats cities as interchangeable nodes produces
-infeasible plans.
-
-Travel time is computed, never stored:
-
-```python
-def transfer_minutes(a, b):
-    km = haversine_km(a, b)
-    if km < 1.2:  return max(5, round(km * 13))          # walking
-    return round(8 + (km * 2.2) / 22.0 * 60)             # 8 min overhead, 2.2 detour, 22 km/h
-```
-
-This is the feasibility gate for scheduling: two activities cannot be booked closer together
-than the journey between their districts.
-
-### Data generation
-
-`generate_world(seed)` runs a seven-stage pipeline off a single `np.random.default_rng`:
-calendar/season → frozen geography → supply → depletion → persona → gate → disruption seeds.
-Determinism is absolute — `generate_world(42)` is byte-identical every time.
-
-Three modelling choices do the heavy lifting:
-
-**Price correlates with quality, plus noise.** `price = base(quality) × district × season ×
-lead_time × N(1, 0.13)`. Deterministic correlation makes quality a free win; zero
-correlation makes it unlearnable. Noise makes it a judgement call.
-
-**Rating confidence scales with sample size.** `rating_sd = clip(2.4/√review_count, .06,
-1.5)`. A 9.8 from 11 reviews is weak evidence; an 8.6 from 2,400 is strong. Since price
-tracks *stars* (true quality) rather than *displayed rating*, the lucky small-sample hotel
-is cheap and looks excellent — so sorting by rating systematically overpays. **This is how
-the "always pick the highest-rated hotel" exploit is defeated by the data distribution
-rather than by a penalty.**
-
-**Availability is skewed against the good options.** Seats deplete on a Poisson draw scaled
-by fare flexibility, so the well-priced options are disproportionately gone — which is what
-creates genuine search pressure instead of a lookup.
-
-Fare brands (BASIC / STANDARD / FLEX) and rate plans (non-refundable / free-cancellation)
-are the bridge between the two acts. At booking time they look like the same seat at
-different prices. In act II they are not.
-
----
-
-## 3. Reward
-
-```
-per turn:   Φ(s_t) − Φ(s_{t−1})  −  friction
-terminal:   realized_client_utility + budget_efficiency − disruption_damage − patience_forfeit
-```
-
-Every component is emitted separately into `info`, so the shaping analysis needs no rerun.
-
-**The client's preferences are hidden.** Eight axes on a 10-point scale; the opening request
-reveals one to three of them. The reward is a dot product against the hidden weights, so an
-agent that books without interviewing is betting on its prior — and that bet is low-value
-without any penalty term saying so. This is what makes question-asking *instrumentally*
-necessary rather than instructed.
-
-**The shaping term is a potential difference, and Φ is zero at terminal *and* truncation.**
-Ng, Harada & Russell (1999) prove `γΦ(s′) − Φ(s)` is necessary and sufficient for policy
-invariance. Less well known: Grześ (AAMAS 2017) shows the trajectory picks up a `γ^N·Φ(s_N)`
-term that depends on which terminal you reach and can flip the optimal policy — and a step
-cap manufactures exactly that situation. Both conditions are enforced.
-
-**No exploration bonus,** deliberately. Rewarding exploration tends to buy turns that look
-exploratory and do nothing: questions asked for the bonus rather than for the answer.
-
-**No LLM anywhere in the reward path.** Reward is integer arithmetic over a transaction
-ledger. Same seed, same reward, every time.
-
-### The exploit table
-
-| Cheapest exploit | Structural defence |
+| Path | Contents |
 |---|---|
-| Always book the cheapest flight | Act II makes cheap+fragile lose in expectation; reliability is priced |
-| Always pick the highest-rated hotel | Rating variance shrinks with review count; price tracks stars, not rating |
-| Finish in one step, never ask | Hidden weights ⇒ an unelicited booking has low expected utility |
-| Never book anything | Zero itinerary ⇒ zero utility; the potential telescopes to zero |
-| Spend the whole budget to look thorough | Efficiency bonus is **gated** on hard needs met |
-| Ask forever | Patience depletes; the client walks |
-| Overspend | Not penalised — the action is **masked out** |
+| `travel_env/` | the environments, world generators, contracts, ledger, timeline, reward, disruption engine, LLM adapters |
+| `eval/` | baselines, the evaluation harness (solve rate, IQM return, pass^k), the LLM evaluation |
+| `scripts/` | smoke test, training, checkpoint playback, data dumps, the travel-time fetcher |
+| `tests/` | 98 invariant tests for v1 that drive the real environment, no mocks |
+| `data/` | the travel-time matrix, a sample world, sample clients, measured world statistics |
+| `logs/published/`, `models/v1_ppo/` | training logs, baseline outputs, the v1 checkpoint |
 
-**Denominator audit.** Agents game ratios by shrinking the denominator, not growing the
-numerator. This reward contains exactly one ratio — budget efficiency — and it is gated on
-hard-needs-met, so booking less to spend less fails the gate and scores zero.
+## Licence
 
----
-
-## 4. Gates, not penalties
-
-Illegal actions are removed from the action space by `action_masks()`, never punished.
-Nine of the environment's twenty-one invariants are enforced this way: you cannot book past
-your budget, book a hotel in a city you are not in, schedule a museum on its closed day, or
-book two activities closer together than the journey between them.
-
-The evidence is unusually strong. Huang & Ontañón (arXiv:2006.14171) found that across every
-penalty weight tried, the agent *"struggles to even find the very first reward"* on any map
-≥10×10, while masking stayed scale-invariant — and the invalid-action policy gradient is
-provably the gradient of the masked policy, with the gradient w.r.t. an invalid logit
-exactly zero.
-
-Both conventions are exposed: `action_masks()` for `MaskablePPO`, and `info["action_mask"]`
-for Gymnasium-native consumers.
-
----
-
-## 5. Evaluation
-
-`eval/harness.py` runs five baselines and reports solve rate, IQM return, completion, walk
-rate, elicitation, budget use, and `pass^k` — using the unbiased combinatorial estimator
-`(1/|T|)·Σ C(c,k)/C(n,k)`, not `1−(1−p)^k`, because nobody gets to re-roll a booking.
-
-Two numbers are **gates, not reports**:
-- `null` and `random` must score ≈ 0. tau-bench's own reward gives a do-nothing agent 38%
-  success on their benchmark; ours gives 0% and 4%.
-- `heuristic` must clearly beat `greedy_*`. It does, by ~1.4 reward.
-
-Metrics distinguish `None` from `0.0`. A disruption-recovery rate of 1.0 when nothing was
-disrupted is not a pass, it is an unmeasured metric.
-
----
-
-## 6. What is honestly wrong with this
-
-- **The heuristic solves 96%**, which leaves a learned policy almost nothing to discover.
-  Difficulty needs tightening; the knob exists
-  (`difficulty` scales budget, patience and revealed axes) but is not yet calibrated.
-- **The client is not yet LLM-driven.** The interface and model choice are settled
-  (`openai/gpt-4.1-mini` on an OpenAI-compatible gateway, with `claude-haiku-4.5` for the simulator-swap
-  sensitivity test) but `client.py` is unwritten. This is the top of the list.
-- **There are no tests.** Everything above rests on code verified by running it, not by a
-  suite. This is the largest risk in the repo.
-- **Known causality gaps:** inventory depletes once at world-build rather than during
-  the episode, so dithering is free; booking a late flight does not invalidate a morning
-  activity; the client reacts to an axis score rather than to a specific item; hotel check-in
-  time versus flight arrival is unmodelled.
-- **The oracle and regret metric are designed but unbuilt**, so returns are not normalised
-  against achievable optimum.
-- **Priors are self-certified.** There is no real booking data behind them. Price levels, the detour
-  factor and the depletion rates are calibrated against plausibility, not measurement.
-  Internal consistency is testable; the gap to reality is not, from inside.
-
-Two bugs found late and worth recording, because both were invisible to `check_env`:
-the return leg was being drawn from the outbound slate (you could fly home westbound), and
-patience exhaustion after booking left the episode with **no reachable terminal state** —
-`check_env` cannot catch that, because it only ever takes one step.
-
----
-
-## 7. What I'd do next
-
-1. Tests — determinism rollout, ledger reconciliation, mask correctness, `Φ(terminal)=0`.
-2. The LLM client, then an LLM agent evaluated on the same masked action set.
-3. Tighten difficulty into the 10–80% band.
-4. Real geography via a Google Maps transfer matrix fetched once and committed offline.
-5. Accessibility as a hard constraint — step-free access, dietary needs — masking actions
-   rather than reducing utility. Real travel-agent work, and a clean gate.
-6. Deepen the cascade: cross-booking temporal invalidation, in-episode price movement.
-
-## 8. If this were connected to real APIs
-
-The data model is already shaped for it. `Flight` is a flattened projection of an Amadeus
-Flight Offers Search result (`itineraries[].segments[]`, `fareDetailsBySegment[].cabin` and
-`brandedFare`, `numberOfBookableSeats`); lodging keeps the real property → room type → rate
-plan split with board-basis codes.
-
-Three things would change. **Search becomes slow and rate-limited**, so the slate mechanic
-stops being a convenience and becomes a necessity, with caching and a real per-turn latency
-cost. **Fare rules move behind a second call** — refundability is flattened onto the offer here;
-Amadeus does not. And **`on_time_rate` has no API**: it would come from a separate
-historical-performance dataset, which is a data-engineering problem rather than an
-integration one.
-
-The reward and the ledger would not change at all. That is the point of making the ledger
-authoritative — it does not care whether the inventory behind it is simulated or real.
+MIT. See [LICENSE](LICENSE).
